@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Prompter">
+<meta name="theme-color" content="#060607">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Prompter</title>
+<style>
+:root{
+  --bg:#060607; --surface:#121214; --surface-2:#1b1b1f; --surface-3:#26262b;
+  --hair:rgba(255,255,255,.08); --hair-strong:rgba(255,255,255,.14);
+  --text:#f5f5f7; --text-2:#a1a1aa; --text-3:#6e6e78;
+  --amber:#ffb547; --amber-ink:#1a1206; --red:#ff453a; --green:#32d74b;
+  --glass:rgba(22,22,26,.62);
+  --safe-t:env(safe-area-inset-top); --safe-b:env(safe-area-inset-bottom);
+  --ease:cubic-bezier(.22,1,.36,1);
+  color-scheme:dark;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font:17px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Inter",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;overscroll-behavior:none}
+button{font:inherit;color:inherit;border:0;background:none;padding:0;cursor:pointer;touch-action:manipulation}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+svg{display:block}
+.hidden{display:none!important}
+.screen{min-height:100%;max-width:640px;margin:0 auto;padding:calc(var(--safe-t) + 10px) 16px calc(var(--safe-b) + 24px)}
+
+/* ---------- shared controls ---------- */
+.icon-btn{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;color:var(--text);transition:transform .2s var(--ease),background .2s}
+.icon-btn:active{transform:scale(.9)}
+.glass{background:var(--glass);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.12)}
+.pill{height:44px;padding:0 18px;border-radius:22px;display:inline-flex;align-items:center;gap:8px;font-weight:600;font-size:16px;
+  transition:transform .2s var(--ease),background .2s,color .2s}
+.pill:active{transform:scale(.96)}
+.pill.solid{background:var(--text);color:#000}
+.pill.quiet{background:var(--surface-2)}
+.rec-dot{width:10px;height:10px;border-radius:50%;background:var(--red)}
+
+/* ---------- library ---------- */
+.nav{display:flex;align-items:center;justify-content:space-between;height:44px}
+.large-title{font:700 34px/1.1 -apple-system,"SF Pro Display",system-ui,sans-serif;letter-spacing:-.025em;margin:6px 0 4px}
+.sub{color:var(--text-2);font-size:15px;margin:0 0 22px}
+.add-btn{background:var(--surface-2)}
+.group{background:var(--surface);border-radius:16px;overflow:hidden}
+.row{display:flex;align-items:center;gap:14px;padding:14px 14px 14px 18px;position:relative;cursor:pointer}
+.row+.row::before{content:"";position:absolute;top:0;left:18px;right:0;height:.5px;background:var(--hair-strong)}
+.row:active{background:var(--surface-2)}
+.row .meta{flex:1;min-width:0}
+.row .name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .info{color:var(--text-2);font-size:14px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .first{color:var(--text-3);font-size:14px;margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.shoot{width:44px;height:44px;flex:none;border-radius:50%;display:grid;place-items:center;
+  box-shadow:inset 0 0 0 2.5px rgba(255,255,255,.9);transition:transform .2s var(--ease)}
+.shoot i{width:30px;height:30px;border-radius:50%;background:var(--red)}
+.shoot:active{transform:scale(.88)}
+.empty{text-align:center;padding:72px 24px 24px}
+.empty .mark{width:76px;height:76px;margin:0 auto 22px;border-radius:22px;background:var(--surface);display:grid;place-items:center}
+.empty h2{font:700 22px/1.2 -apple-system,"SF Pro Display",system-ui,sans-serif;letter-spacing:-.015em;margin:0 0 8px}
+.empty p{color:var(--text-2);margin:0 auto 26px;max-width:28ch;font-size:16px}
+
+/* ---------- editor ---------- */
+#editView{display:flex;flex-direction:column;min-height:100%}
+.back{display:flex;align-items:center;gap:2px;color:var(--amber);font-size:17px;height:44px;margin-left:-6px}
+.title-in{width:100%;background:none;border:0;color:var(--text);padding:6px 0 2px;
+  font:700 28px/1.15 -apple-system,"SF Pro Display",system-ui,sans-serif;letter-spacing:-.02em}
+.title-in::placeholder,.body-in::placeholder{color:var(--text-3)}
+.title-in:focus,.body-in:focus{outline:none}
+.body-in{width:100%;min-height:52vh;background:none;border:0;color:var(--text);resize:none;padding:12px 0 120px;overflow:hidden;
+  font:400 19px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif}
+.dock{position:fixed;left:0;right:0;bottom:0;padding:12px 16px calc(var(--safe-b) + 12px);
+  background:linear-gradient(transparent,var(--bg) 35%)}
+.dock-in{max-width:608px;margin:0 auto;display:flex;align-items:center;gap:6px}
+.dock .stats{flex:1;color:var(--text-2);font-size:14px;font-variant-numeric:tabular-nums;padding-left:4px}
+.dock .icon-btn{background:var(--surface-2);color:var(--text-2)}
+
+/* ---------- recorder ---------- */
+#rec{position:fixed;inset:0;background:#000;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+#cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .5s}
+#cam.live{opacity:1}
+#cam.mirror{transform:scaleX(-1)}
+.no-cam{position:absolute;inset:0;display:grid;place-items:center;color:var(--text-3);font-size:15px;padding:0 40px;text-align:center}
+.top{position:absolute;z-index:4;left:0;right:0;top:calc(var(--safe-t) + 6px);height:44px;padding:0 12px;
+  display:flex;align-items:center;justify-content:space-between}
+.top .r{display:flex;gap:8px}
+#timer{position:absolute;left:50%;transform:translateX(-50%);height:30px;padding:0 12px;border-radius:15px;
+  display:flex;align-items:center;gap:7px;font-weight:600;font-size:15px;font-variant-numeric:tabular-nums}
+#timer .rec-dot{animation:blink 1.2s steps(2,start) infinite}
+@keyframes blink{to{visibility:hidden}}
+
+#prompt{position:absolute;left:0;right:0;top:calc(var(--safe-t) + 56px);height:var(--ph,40%);overflow:hidden;
+  background:linear-gradient(rgba(0,0,0,calc(var(--dim,.55) + .15)),rgba(0,0,0,var(--dim,.55)) 70%,rgba(0,0,0,0));
+  backdrop-filter:blur(var(--blur,14px));-webkit-backdrop-filter:blur(var(--blur,14px));
+  -webkit-mask-image:linear-gradient(transparent 0,#000 14%,#000 78%,transparent 100%);
+          mask-image:linear-gradient(transparent 0,#000 14%,#000 78%,transparent 100%)}
+#ptext{padding:0 26px 90vh;padding-top:calc(var(--ph-px,300px) * .3);font:600 var(--fs,34px)/1.32 -apple-system,"SF Pro Display",system-ui,sans-serif;
+  letter-spacing:-.01em;transform:translateY(var(--y,0));will-change:transform;white-space:pre-wrap;overflow-wrap:break-word;
+  text-shadow:0 1px 12px rgba(0,0,0,.35)}
+#prompt.flip #ptext{transform:translateY(var(--y,0)) scaleX(-1)}
+#ptext .w{transition:color .35s var(--ease)}
+#ptext .w.read{color:rgba(245,245,247,.32)}
+#ptext .w.now{color:var(--amber)}
+#guide{position:absolute;left:8px;top:30%;width:4px;height:calc(var(--fs,34px) * 1.1);transform:translateY(-15%);border-radius:2px;
+  background:rgba(255,255,255,.25);transition:background .3s}
+#rec.listening #guide{background:var(--amber);box-shadow:0 0 0 0 rgba(255,181,71,.6);animation:breathe 1.6s var(--ease) infinite}
+@keyframes breathe{0%{box-shadow:0 0 0 0 rgba(255,181,71,.55)}100%{box-shadow:0 0 0 7px rgba(255,181,71,0)}}
+
+.bottom{position:absolute;z-index:4;left:0;right:0;bottom:0;padding:24px 16px calc(var(--safe-b) + 16px);
+  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;
+  background:linear-gradient(transparent,rgba(0,0,0,.55))}
+.bottom .l{display:flex;gap:8px;justify-self:start}
+.bottom .r{display:flex;gap:8px;justify-self:end}
+#micBtn{height:44px;padding:0 15px 0 12px;border-radius:22px;display:flex;align-items:center;gap:7px;font-weight:600;font-size:15px;transition:background .25s,color .25s,transform .2s var(--ease)}
+#micBtn:active{transform:scale(.95)}
+#micBtn.on{background:var(--amber);color:var(--amber-ink);box-shadow:none}
+.icon-btn.glass{width:44px;height:44px}
+#recBtn{width:78px;height:78px;border-radius:50%;display:grid;place-items:center;box-shadow:inset 0 0 0 4px #fff}
+#recBtn i{width:62px;height:62px;border-radius:31px;background:var(--red);transition:all .3s var(--ease)}
+#recBtn.on i{width:30px;height:30px;border-radius:8px}
+#recBtn:active i{transform:scale(.92)}
+#recBtn:disabled{opacity:.6}
+
+#count{position:absolute;inset:0;z-index:6;display:grid;place-items:center;pointer-events:none}
+#count span{font:800 150px/1 -apple-system,"SF Pro Display",system-ui,sans-serif;font-variant-numeric:tabular-nums;
+  text-shadow:0 8px 40px rgba(0,0,0,.5);animation:pop .8s var(--ease) both}
+@keyframes pop{0%{opacity:0;transform:scale(1.5);filter:blur(10px)}30%{opacity:1;transform:scale(1);filter:blur(0)}85%{opacity:1}100%{opacity:0;transform:scale(.9)}}
+
+/* settings sheet */
+#scrim{position:absolute;inset:0;z-index:7;background:rgba(0,0,0,.35);opacity:0;pointer-events:none;transition:opacity .3s}
+#scrim.open{opacity:1;pointer-events:auto}
+#sheet{position:absolute;z-index:8;left:8px;right:8px;bottom:calc(var(--safe-b) + 8px);max-height:78%;overflow:auto;
+  border-radius:24px;padding:8px 16px 16px;background:rgba(28,28,32,.86);
+  backdrop-filter:blur(30px) saturate(170%);-webkit-backdrop-filter:blur(30px) saturate(170%);
+  box-shadow:0 20px 60px rgba(0,0,0,.5),inset 0 0 0 .5px rgba(255,255,255,.1);
+  transform:translateY(calc(100% + 40px));transition:transform .45s var(--ease)}
+#sheet.open{transform:none}
+.grab{width:36px;height:5px;border-radius:3px;background:var(--surface-3);margin:2px auto 10px}
+.sheet-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.sheet-head h3{margin:0;font-size:19px;font-weight:700}
+.sheet-head button{color:var(--amber);font-weight:600;height:36px;padding:0 4px}
+.set-group{background:rgba(255,255,255,.05);border-radius:14px;margin-bottom:14px}
+.set{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 14px;min-height:50px;position:relative}
+.set+.set::before{content:"";position:absolute;top:0;left:14px;right:0;height:.5px;background:var(--hair-strong)}
+.set .lbl{flex:1;min-width:0}
+.set small{display:block;color:var(--text-2);font-size:13px;margin-top:1px}
+.set.slider{flex-direction:column;align-items:stretch;gap:10px}
+.set.slider .top-line{display:flex;justify-content:space-between}
+.set.slider output{color:var(--text-2);font-variant-numeric:tabular-nums}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:28px;background:none}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;
+  background:linear-gradient(90deg,var(--amber) var(--p,50%),var(--surface-3) var(--p,50%))}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;margin-top:-11px;border-radius:50%;background:#fff;
+  box-shadow:0 2px 6px rgba(0,0,0,.35)}
+.switch{-webkit-appearance:none;appearance:none;width:51px;height:31px;border-radius:16px;background:#45454c;position:relative;
+  flex:none;cursor:pointer;transition:background .25s}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;
+  box-shadow:0 2px 4px rgba(0,0,0,.3);transition:transform .3s var(--ease)}
+.switch:checked{background:var(--green)}
+.switch:checked::after{transform:translateX(20px)}
+.seg{display:flex;background:var(--surface-3);border-radius:9px;padding:2px}
+.seg button{padding:5px 12px;border-radius:7px;font-size:14px;font-weight:600;color:var(--text-2)}
+.seg button.on{background:#5b5b63;color:#fff}
+
+/* review */
+#review{position:fixed;inset:0;z-index:10;background:#000;display:flex;flex-direction:column}
+#review video{flex:1;width:100%;min-height:0;object-fit:contain}
+.review-bar{display:flex;gap:10px;padding:14px 16px calc(var(--safe-b) + 14px)}
+.review-bar .pill{flex:1;justify-content:center;height:52px;border-radius:26px;font-size:17px}
+.review-head{position:absolute;top:calc(var(--safe-t) + 10px);left:0;right:0;text-align:center;font-weight:600;font-size:15px;
+  color:var(--text-2);pointer-events:none}
+
+#msg{position:fixed;z-index:20;left:50%;top:calc(var(--safe-t) + 60px);transform:translate(-50%,-8px);opacity:0;
+  width:max-content;max-width:calc(100% - 32px);padding:12px 16px;border-radius:16px;font-size:15px;text-align:center;
+  pointer-events:none;transition:opacity .3s,transform .4s var(--ease)}
+#msg.show{opacity:1;transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+
+<!-- ============ LIBRARY ============ -->
+<main id="home">
+  <section id="libView" class="screen">
+    <div class="nav">
+      <span></span>
+      <button class="icon-btn add-btn" id="newBtn" aria-label="New script">
+        <svg width="18" height="18" viewBox="0 0 18 18"><path d="M9 2v14M2 9h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <h1 class="large-title">Scripts</h1>
+    <p class="sub" id="libSub">Speak, and your script follows along.</p>
+    <div id="list"></div>
+  </section>
+
+  <section id="editView" class="screen hidden">
+    <div class="nav">
+      <button class="back" id="backBtn">
+        <svg width="22" height="22" viewBox="0 0 22 22"><path d="M14 4 7 11l7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Scripts
+      </button>
+    </div>
+    <input type="text" id="title" class="title-in" placeholder="Untitled script" autocomplete="off">
+    <textarea id="body" class="body-in" placeholder="Paste or type what you want to say…"></textarea>
+    <input type="file" id="fileIn" accept=".txt,text/plain" class="hidden">
+    <div class="dock"><div class="dock-in">
+      <span class="stats" id="stats"></span>
+      <button class="icon-btn" id="importBtn" aria-label="Import a text file">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v9M5.5 7.5 9 11l3.5-3.5M3 12.5V15h12v-2.5"/></svg>
+      </button>
+      <button class="icon-btn" id="delBtn" aria-label="Delete script">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h12M7 5V3h4v2M4.5 5l.8 10h7.4l.8-10"/></svg>
+      </button>
+      <button class="pill solid" id="goBtn"><span class="rec-dot"></span>Record</button>
+    </div></div>
+  </section>
+</main>
+
+<!-- ============ RECORDER ============ -->
+<section id="rec" class="hidden">
+  <div class="no-cam" id="noCam">Waiting for camera…</div>
+  <video id="cam" playsinline autoplay muted class="mirror"></video>
+  <div id="prompt"><div id="ptext"></div><div id="guide"></div></div>
+
+  <div class="top">
+    <button class="icon-btn glass" id="closeBtn" aria-label="Close">
+      <svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 3l10 10M13 3 3 13" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+    </button>
+    <div id="timer" class="glass hidden"><span class="rec-dot"></span><span id="timerT">0:00</span></div>
+    <div class="r">
+      <button class="icon-btn glass" id="setBtn" aria-label="Display settings">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"/><circle cx="13" cy="6" r="2"/><circle cx="7" cy="14" r="2"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div id="count" class="hidden"></div>
+
+  <div class="bottom">
+    <div class="l">
+      <button id="micBtn" class="glass"></button>
+    </div>
+    <button id="recBtn" aria-label="Start recording"><i></i></button>
+    <div class="r">
+      <button class="icon-btn glass" id="restartBtn" aria-label="Back to the top">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9a5.5 5.5 0 1 0 1.6-3.9M3.5 2.5v3h3"/></svg>
+      </button>
+      <button class="icon-btn glass" id="flipCamBtn" aria-label="Switch camera">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5h3l1.5-2h6l1.5 2h3v9h-15z"/><path d="M7.6 11.2a2.6 2.6 0 0 1 4.6-1.4M12.4 12.8a2.6 2.6 0 0 1-4.6 1.4"/><path d="M12.4 8.6v1.4H11M7.6 15.4V14H9"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div id="scrim"></div>
+  <div id="sheet" role="dialog" aria-label="Display settings">
+    <div class="grab"></div>
+    <div class="sheet-head"><h3>Display</h3><button id="sheetDone">Done</button></div>
+    <div class="set-group">
+      <div class="set slider"><div class="top-line"><span>Text size</span><output id="oFs"></output></div>
+        <input type="range" id="sFs" min="22" max="64" step="1"></div>
+      <div class="set slider"><div class="top-line"><span>Prompter height</span><output id="oPh"></output></div>
+        <input type="range" id="sPh" min="25" max="80" step="1"></div>
+      <div class="set slider"><div class="top-line"><span>Backdrop</span><output id="oDim"></output></div>
+        <input type="range" id="sDim" min="0" max="90" step="5"></div>
+    </div>
+    <div class="set-group">
+      <label class="set"><span class="lbl">Start listening when I hit record<small>The script only moves when you speak. Drag it to jump.</small></span>
+        <input type="checkbox" class="switch" id="sAuto"></label>
+      <label class="set"><span class="lbl">3-second countdown</span><input type="checkbox" class="switch" id="sCount"></label>
+      <label class="set"><span class="lbl">Mirror text<small>For a teleprompter glass rig</small></span><input type="checkbox" class="switch" id="sFlip"></label>
+      <div class="set"><span class="lbl">Video quality</span>
+        <div class="seg" id="sQ"><button data-v="720">720p</button><button data-v="1080">1080p</button></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ REVIEW ============ -->
+<section id="review" class="hidden">
+  <video id="playback" playsinline controls></video>
+  <div class="review-head" id="reviewHead">Your take</div>
+  <div class="review-bar">
+    <button class="pill quiet" id="discardBtn">Retake</button>
+    <button class="pill solid" id="saveBtn">Save to Photos</button>
+  </div>
+</section>
+
+<div id="msg" class="glass" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d){ try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+};
+function toast(t, ms = 2800){ const m = $('msg'); m.textContent = t; m.classList.add('show');
+  clearTimeout(toast.h); toast.h = setTimeout(() => m.classList.remove('show'), ms); }
+const ICON = {
+  mic: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="6.5" y="2" width="5" height="9" rx="2.5"/><path d="M3.8 8.5a5.2 5.2 0 0 0 10.4 0M9 13.7V16"/><path d="M2.5 2.5l13 13"/></svg>',
+  micOn: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="6.5" y="2" width="5" height="9" rx="2.5" fill="currentColor"/><path d="M3.8 8.5a5.2 5.2 0 0 0 10.4 0M9 13.7V16"/></svg>'
+};
+
+/* ---------------- Scripts library ---------------- */
+let scripts = store.get('scripts', []);
+let current = null;
+const save = () => store.set('scripts', scripts);
+const wordCount = s => (s.trim().match(/\S+/g) || []).length;
+const readTime = n => n < 75 ? '<1 min' : `~${Math.round(n / 150) || 1} min`;
+
+function renderList(){
+  const l = $('list'); l.innerHTML = '';
+  $('libSub').classList.toggle('hidden', !scripts.length);
+  if (!scripts.length){
+    l.innerHTML = `<div class="empty">
+      <div class="mark"><svg width="34" height="34" viewBox="0 0 34 34" fill="none" stroke="#ffb547" stroke-width="2.4" stroke-linecap="round"><path d="M8 10h18M8 17h13M8 24h16" /></svg></div>
+      <h2>Your first script</h2>
+      <p>Paste in what you want to say. When you record, it scrolls as you talk.</p>
+      <button class="pill solid" id="emptyNew">New script</button></div>`;
+    $('emptyNew').onclick = newScript; return;
+  }
+  const g = document.createElement('div'); g.className = 'group';
+  [...scripts].sort((a,b) => b.updated - a.updated).forEach(s => {
+    const n = wordCount(s.body);
+    const d = document.createElement('div'); d.className = 'row'; d.tabIndex = 0;
+    const m = document.createElement('div'); m.className = 'meta';
+    const a = document.createElement('div'); a.className = 'name'; a.textContent = s.title || 'Untitled script';
+    const i = document.createElement('div'); i.className = 'info';
+    i.textContent = `${n} words · ${readTime(n)} · ${new Date(s.updated).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+    const f = document.createElement('div'); f.className = 'first'; f.textContent = s.body.trim().slice(0, 140);
+    m.append(a, i, f);
+    const go = document.createElement('button'); go.className = 'shoot'; go.setAttribute('aria-label', 'Record ' + (s.title || 'script'));
+    go.innerHTML = '<i></i>';
+    go.onclick = e => { e.stopPropagation(); if (!s.body.trim()) return openEditor(s); current = s; openRecorder(); };
+    d.append(m, go); d.onclick = () => openEditor(s); g.append(d);
+  });
+  l.append(g);
+}
+function updStats(){ const n = wordCount($('body').value); $('stats').textContent = n ? `${n} words · ${readTime(n)}` : '';
+  const b = $('body'); b.style.height = 'auto'; b.style.height = b.scrollHeight + 'px'; } // grow with the text
+function show(id){ ['libView','editView'].forEach(v => $(v).classList.toggle('hidden', v !== id)); window.scrollTo(0, 0); }
+function openEditor(s){ current = s; $('title').value = s.title; $('body').value = s.body; show('editView'); updStats(); }
+function commitEditor(){
+  if (!current) return;
+  current.title = $('title').value.trim(); current.body = $('body').value; current.updated = Date.now(); save();
+}
+function newScript(){ const s = { id: Date.now().toString(36), title: '', body: '', updated: Date.now() };
+  scripts.push(s); save(); openEditor(s); $('body').focus(); }
+function backToList(){ commitEditor();
+  if (current && !current.title && !current.body.trim()){ scripts = scripts.filter(x => x !== current); save(); }
+  show('libView'); renderList(); }
+$('newBtn').onclick = newScript;
+$('backBtn').onclick = backToList;
+$('title').oninput = $('body').oninput = () => { updStats(); commitEditor(); };
+$('delBtn').onclick = () => { if (!confirm('Delete this script?')) return;
+  scripts = scripts.filter(x => x !== current); save(); current = null; show('libView'); renderList(); };
+$('importBtn').onclick = () => $('fileIn').click();
+$('fileIn').onchange = async e => { const f = e.target.files[0]; if (!f) return;
+  $('body').value = await f.text(); if (!$('title').value) $('title').value = f.name.replace(/\.[^.]+$/, '');
+  commitEditor(); updStats(); e.target.value = ''; };
+$('goBtn').onclick = () => { commitEditor(); if (!current.body.trim()) return toast('Add some words to your script first'); openRecorder(); };
+
+/* ---------------- Settings ---------------- */
+const S = Object.assign({ fs: 34, ph: 40, dim: 45, count: true, auto: true, flip: false, q: '720', facing: 'user' },
+                        store.get('settings', {}));
+const saveS = () => store.set('settings', S);
+function applyS(){
+  const r = $('rec').style;
+  r.setProperty('--fs', S.fs + 'px'); r.setProperty('--ph', S.ph + '%');
+  r.setProperty('--dim', S.dim / 100); r.setProperty('--blur', Math.round(S.dim / 4) + 'px');
+  r.setProperty('--ph-px', (innerHeight * S.ph / 100) + 'px');
+  $('prompt').classList.toggle('flip', S.flip);
+  $('oFs').textContent = S.fs; $('oPh').textContent = S.ph + '%'; $('oDim').textContent = S.dim + '%';
+  [['sFs',22,64],['sPh',25,80],['sDim',0,90]].forEach(([id,lo,hi]) =>
+    $(id).style.setProperty('--p', ((+$(id).value - lo) / (hi - lo) * 100) + '%'));
+  [...$('sQ').children].forEach(b => b.classList.toggle('on', b.dataset.v === S.q));
+}
+[['sFs','fs'],['sPh','ph'],['sDim','dim']].forEach(([id,k]) => { $(id).value = S[k];
+  $(id).oninput = e => { S[k] = +e.target.value; applyS(); saveS(); if (k !== 'dim') reanchor(); }; });
+[['sCount','count'],['sAuto','auto'],['sFlip','flip']].forEach(([id,k]) => { $(id).checked = S[k];
+  $(id).onchange = e => { S[k] = e.target.checked; applyS(); saveS(); }; });
+$('sQ').onclick = e => { const v = e.target.dataset?.v; if (!v || v === S.q) return; S.q = v; saveS(); applyS(); if (!recording) startCam(); };
+const setSheet = open => { $('sheet').classList.toggle('open', open); $('scrim').classList.toggle('open', open); };
+$('setBtn').onclick = () => setSheet(true);
+$('sheetDone').onclick = $('scrim').onclick = () => setSheet(false);
+
+/* ---------------- Camera ---------------- */
+let stream = null;
+async function startCam(){
+  stopCam();
+  const h = +S.q, w = Math.round(h * 16 / 9);
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: S.facing, width: { ideal: h }, height: { ideal: w } }, // portrait
+      audio: { echoCancellation: true, noiseSuppression: true }
+    });
+    $('cam').srcObject = stream; $('cam').classList.add('live'); $('noCam').classList.add('hidden');
+    $('cam').classList.toggle('mirror', S.facing === 'user');
+  } catch (e) {
+    $('noCam').textContent = 'Camera is off. Allow camera and microphone for this app in Settings, then reopen it.';
+    console.error(e);
+  }
+}
+function stopCam(){ if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; $('cam').classList.remove('live'); }
+$('flipCamBtn').onclick = () => { if (recording) return; S.facing = S.facing === 'user' ? 'environment' : 'user'; saveS(); startCam(); };
+
+/* ---------------- Prompter (moves only with your voice) ---------------- */
+const pt = $('ptext');
+let y = 0, words = [], wordIdx = -1;
+
+function buildText(text){
+  pt.innerHTML = ''; words = [];
+  // Wrap each word in a span (keeps original spacing/newlines) so we can track and highlight it
+  text.trim().split(/(\s+)/).forEach(tok => {
+    if (!tok) return;
+    if (/^\s+$/.test(tok)) { pt.append(tok); return; }
+    const s = document.createElement('span'); s.className = 'w'; s.textContent = tok;
+    s.dataset.n = norm(tok); words.push(s); pt.append(s);
+  });
+  resetPos();
+}
+const NUM = ['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve',
+  'thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty'];
+const norm = s => { s = s.toLowerCase().replace(/[’]/g, "'").replace(/[^\p{L}\p{N}']/gu, '');
+  return /^\d+$/.test(s) && +s <= 20 ? NUM[+s] : s; };
+const same = (a, b) => a === b || (a.length >= 5 && b.length >= 5 && a.slice(0, 4) === b.slice(0, 4));
+const guideY = () => $('prompt').clientHeight * 0.3;
+const maxY = () => Math.max(0, pt.scrollHeight - $('prompt').clientHeight * 0.7);
+function setY(){ y = Math.min(Math.max(0, y), maxY()); pt.style.setProperty('--y', -y + 'px'); }
+const wordTop = w => w.offsetTop; // position inside the prompter, before scrolling
+
+function paint(){ words.forEach((w, k) => w.className = k <= wordIdx ? 'w read' : k === wordIdx + 1 ? 'w now' : 'w'); }
+function resetPos(){ cancelAnimationFrame(animH); y = 0; wordIdx = -1; paint(); setY(); }
+function reanchor(){ requestAnimationFrame(() => { if (wordIdx >= 0) { y = wordTop(words[wordIdx]) - guideY(); setY(); } }); }
+$('restartBtn').onclick = resetPos;
+
+// drag to jump around; listening picks up from wherever the guide line lands
+let dragY = null;
+$('prompt').addEventListener('pointerdown', e => { dragY = e.clientY; cancelAnimationFrame(animH); });
+window.addEventListener('pointermove', e => { if (dragY == null) return;
+  y -= e.clientY - dragY; dragY = e.clientY; setY(); });
+window.addEventListener('pointerup', () => { if (dragY != null) syncWordToY(); dragY = null; });
+function syncWordToY(){
+  const line = y + guideY();
+  const i = words.findIndex(w => wordTop(w) + w.offsetHeight > line);
+  wordIdx = (i < 0 ? words.length : i) - 1; paint();
+}
+
+/* ---------------- Voice follow ---------------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listening = false;
+
+function setListen(on){
+  if (on && !SR) { toast('This browser can’t listen. Open the app from Safari, or drag the text to scroll.', 5000); on = false; }
+  listening = on;
+  $('micBtn').classList.toggle('on', on);
+  $('micBtn').innerHTML = on ? ICON.micOn + '<span>Listening</span>' : ICON.mic + '<span>Listen</span>';
+  $('rec').classList.toggle('listening', on);
+  on ? startVoice() : stopVoice();
+}
+$('micBtn').onclick = () => setListen(!listening);
+
+function startVoice(){
+  if (rec) return;
+  rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = navigator.language || 'en-US';
+  rec.onresult = e => {
+    let txt = '';
+    for (let i = 0; i < e.results.length; i++) txt += ' ' + e.results[i][0].transcript;
+    onHeard(txt);
+  };
+  rec.onend = () => { if (listening) try { rec.start(); } catch { rec = null; startVoice(); } }; // Safari stops every so often
+  rec.onerror = ev => {
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+      toast('Speech recognition is blocked. Turn on Siri & Dictation in Settings, then tap Listen again.', 6000);
+      setListen(false);
+    } else if (ev.error === 'audio-capture') toast('The microphone is busy. Tap Listen to try again.');
+  };
+  try { rec.start(); } catch {}
+}
+function stopVoice(){ if (rec) { rec.onend = null; try { rec.stop(); } catch {} } rec = null; }
+
+// Match the last few words heard against the script just ahead of where you are.
+function onHeard(txt){
+  const heard = txt.split(/\s+/).map(norm).filter(Boolean).slice(-5);
+  if (!heard.length || !words.length) return;
+  const lastW = heard[heard.length - 1];
+  let best = -1, bestScore = 0;
+  const lo = Math.max(0, wordIdx - 2), hi = Math.min(words.length - 1, wordIdx + 30);
+  for (let j = lo; j <= hi; j++) {
+    if (!same(words[j].dataset.n, lastW)) continue;
+    let s = 1;
+    for (let k = 1; k < heard.length && j - k >= 0; k++) {
+      if (same(words[j - k].dataset.n, heard[heard.length - 1 - k])) s++; else break;
+    }
+    const near = Math.abs(j - wordIdx - 1) < Math.abs(best - wordIdx - 1);
+    if (s > bestScore || (s === bestScore && near)) { best = j; bestScore = s; }
+  }
+  if (best <= wordIdx) return;
+  const ahead = best - wordIdx;
+  // a single matching word only counts if it's right where we expect; a run of 2+ can jump further
+  if (bestScore >= 2 || (ahead <= 4 && lastW.length >= 3)) moveTo(best);
+}
+function moveTo(i){
+  wordIdx = i; paint();
+  animateY(wordTop(words[i]) - guideY());
+}
+let animH = 0;
+function animateY(target){
+  cancelAnimationFrame(animH);
+  const step = () => { const d = target - y; if (Math.abs(d) < 0.5) { y = target; setY(); return; }
+    y += d * 0.12; setY(); animH = requestAnimationFrame(step); };
+  step();
+}
+window.__heard = onHeard; // handy for testing in a desktop browser
+
+/* ---------------- Recording ---------------- */
+let recorder = null, chunks = [], recording = false, startT = 0, timerH = 0, lastBlob = null, lastMime = '';
+function pickMime(){
+  const opts = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'];
+  return opts.find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
+}
+async function countdown(){
+  if (!S.count) return;
+  const c = $('count'); c.classList.remove('hidden');
+  for (let n = 3; n > 0; n--) { c.innerHTML = `<span>${n}</span>`; await new Promise(r => setTimeout(r, 800)); }
+  c.classList.add('hidden');
+}
+async function startRec(){
+  if (!stream) return toast('The camera isn’t on yet');
+  if (!window.MediaRecorder) return toast('This browser can’t record video');
+  // start listening inside the tap itself — Safari only allows the mic to start from a user gesture
+  if (S.auto && !listening) setListen(true);
+  $('recBtn').disabled = true;
+  await countdown();
+  lastMime = pickMime(); chunks = [];
+  recorder = new MediaRecorder(stream, lastMime ? { mimeType: lastMime, videoBitsPerSecond: S.q === '1080' ? 8e6 : 5e6 } : undefined);
+  recorder.ondataavailable = e => e.data && e.data.size && chunks.push(e.data);
+  recorder.onstop = showReview;
+  recorder.start(1000);
+  recording = true; $('recBtn').classList.add('on'); $('recBtn').disabled = false;
+  $('recBtn').setAttribute('aria-label', 'Stop recording'); $('flipCamBtn').disabled = true;
+  startT = Date.now(); $('timer').classList.remove('hidden'); updTimer(); timerH = setInterval(updTimer, 500);
+}
+function stopRec(){
+  if (!recorder) return;
+  recording = false; recorder.stop(); setListen(false);
+  $('recBtn').classList.remove('on'); $('recBtn').setAttribute('aria-label', 'Start recording'); $('flipCamBtn').disabled = false;
+  clearInterval(timerH); $('timer').classList.add('hidden');
+}
+function updTimer(){ const s = Math.floor((Date.now() - startT) / 1000);
+  $('timerT').textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+$('recBtn').onclick = () => recording ? stopRec() : startRec();
+
+function showReview(){
+  const type = (lastMime || chunks[0]?.type || 'video/mp4').split(';')[0];
+  lastBlob = new Blob(chunks, { type });
+  const v = $('playback'); if (v.src) URL.revokeObjectURL(v.src);
+  v.src = URL.createObjectURL(lastBlob);
+  $('reviewHead').textContent = $('timerT').textContent + ' take';
+  $('review').classList.remove('hidden');
+}
+$('discardBtn').onclick = () => { $('review').classList.add('hidden'); $('playback').pause(); resetPos(); };
+$('saveBtn').onclick = async () => {
+  if (!lastBlob) return;
+  const ext = lastBlob.type.includes('webm') ? 'webm' : 'mp4';
+  const name = (current?.title || 'take').replace(/[^\w-]+/g, '_') + '_' + new Date().toISOString().slice(0,16).replace(/[:T]/g,'-') + '.' + ext;
+  const file = new File([lastBlob], name, { type: lastBlob.type });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(lastBlob); a.download = name;
+  document.body.append(a); a.click(); a.remove();
+};
+
+/* ---------------- Open / close recorder ---------------- */
+let wake = null;
+async function openRecorder(){
+  $('home').classList.add('hidden'); $('rec').classList.remove('hidden');
+  applyS(); setListen(false); buildText(current.body);
+  $('noCam').textContent = 'Waiting for camera…'; $('noCam').classList.remove('hidden');
+  await startCam();
+  try { wake = await navigator.wakeLock?.request('screen'); } catch {}
+}
+$('closeBtn').onclick = () => {
+  if (recording && !confirm('Stop recording and throw this take away?')) return;
+  if (recording) { recorder.onstop = null; stopRec(); }
+  setListen(false); stopCam(); setSheet(false); wake?.release?.(); wake = null;
+  $('rec').classList.add('hidden'); $('home').classList.remove('hidden'); show('libView'); renderList();
+};
+addEventListener('resize', () => { if (!$('rec').classList.contains('hidden')) { applyS(); reanchor(); } });
+
+renderList();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>
