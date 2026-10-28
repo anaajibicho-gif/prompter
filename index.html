@@ -161,6 +161,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;heigh
   box-shadow:0 2px 4px rgba(0,0,0,.3);transition:transform .3s var(--ease)}
 .switch:checked{background:var(--green)}
 .switch:checked::after{transform:translateX(20px)}
+.cam-info{color:var(--text-2);font-size:14px;font-variant-numeric:tabular-nums}
 .seg{display:flex;background:var(--surface-3);border-radius:9px;padding:2px}
 .seg button{padding:5px 12px;border-radius:7px;font-size:14px;font-weight:600;color:var(--text-2)}
 .seg button.on{background:#5b5b63;color:#fff}
@@ -261,6 +262,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;heigh
         <input type="range" id="sFs" min="22" max="64" step="1"></div>
       <div class="set slider"><div class="top-line"><span>Prompter height</span><output id="oPh"></output></div>
         <input type="range" id="sPh" min="25" max="80" step="1"></div>
+      <div class="set slider hidden" id="zoomRow"><div class="top-line"><span>Camera zoom</span><output id="oZoom"></output></div>
+        <input type="range" id="sZoom" min="1" max="2" step="0.05" value="1"></div>
       <div class="set slider"><div class="top-line"><span>Backdrop</span><output id="oDim"></output></div>
         <input type="range" id="sDim" min="0" max="90" step="5"></div>
     </div>
@@ -269,8 +272,11 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;heigh
         <input type="checkbox" class="switch" id="sAuto"></label>
       <label class="set"><span class="lbl">3-second countdown</span><input type="checkbox" class="switch" id="sCount"></label>
       <label class="set"><span class="lbl">Mirror text<small>For a teleprompter glass rig</small></span><input type="checkbox" class="switch" id="sFlip"></label>
+      <label class="set"><span class="lbl">Wider view<small>Uses the camera's full picture. Video comes out a little less tall (3:4).</small></span>
+        <input type="checkbox" class="switch" id="sWide"></label>
       <div class="set"><span class="lbl">Video quality</span>
         <div class="seg" id="sQ"><button data-v="720">720p</button><button data-v="1080">1080p</button></div></div>
+      <div class="set"><span class="lbl">Camera</span><span id="camInfo" class="cam-info">off</span></div>
     </div>
   </div>
 </section>
@@ -361,7 +367,7 @@ $('fileIn').onchange = async e => { const f = e.target.files[0]; if (!f) return;
 $('goBtn').onclick = () => { commitEditor(); if (!current.body.trim()) return toast('Add some words to your script first'); openRecorder(); };
 
 /* ---------------- Settings ---------------- */
-const S = Object.assign({ fs: 34, ph: 40, dim: 45, count: true, auto: true, flip: false, q: '720', facing: 'user' },
+const S = Object.assign({ fs: 34, ph: 40, dim: 45, count: true, auto: true, flip: false, q: '720', wide: false, zoom: null, facing: 'user' },
                         store.get('settings', {}));
 const saveS = () => store.set('settings', S);
 function applyS(){
@@ -374,41 +380,57 @@ function applyS(){
   [['sFs',22,64],['sPh',25,80],['sDim',0,90]].forEach(([id,lo,hi]) =>
     $(id).style.setProperty('--p', ((+$(id).value - lo) / (hi - lo) * 100) + '%'));
   [...$('sQ').children].forEach(b => b.classList.toggle('on', b.dataset.v === S.q));
+  const z = $('sZoom'); z.style.setProperty('--p', ((z.value - z.min) / ((z.max - z.min) || 1) * 100) + '%');
+  $('oZoom').textContent = (+z.value).toFixed(1) + '×';
 }
 [['sFs','fs'],['sPh','ph'],['sDim','dim']].forEach(([id,k]) => { $(id).value = S[k];
   $(id).oninput = e => { S[k] = +e.target.value; applyS(); saveS(); if (k !== 'dim') reanchor(); }; });
-[['sCount','count'],['sAuto','auto'],['sFlip','flip']].forEach(([id,k]) => { $(id).checked = S[k];
-  $(id).onchange = e => { S[k] = e.target.checked; applyS(); saveS(); }; });
+[['sCount','count'],['sAuto','auto'],['sFlip','flip'],['sWide','wide']].forEach(([id,k]) => { $(id).checked = S[k];
+  $(id).onchange = e => { S[k] = e.target.checked; applyS(); saveS(); if (k === 'wide' && !recording) startCam(); }; });
 $('sQ').onclick = e => { const v = e.target.dataset?.v; if (!v || v === S.q) return; S.q = v; saveS(); applyS(); if (!recording) startCam(); };
 const setSheet = open => { $('sheet').classList.toggle('open', open); $('scrim').classList.toggle('open', open); };
-$('setBtn').onclick = () => setSheet(true);
+$('setBtn').onclick = () => { camInfo(); setSheet(true); };
 $('sheetDone').onclick = $('scrim').onclick = () => setSheet(false);
 
 /* ---------------- Camera ---------------- */
 let stream = null;
-const portraitScreen = () => innerHeight >= innerWidth;
-async function getCam(w, h){
-  return navigator.mediaDevices.getUserMedia({
-    video: { facingMode: S.facing, width: { ideal: w }, height: { ideal: h }, frameRate: { ideal: 30 } },
-    audio: { echoCancellation: true, noiseSuppression: true }
-  });
-}
 async function startCam(){
   stopCam();
-  // Ask in landscape terms (how camera sensors are described); iPhone rotates it to match the phone.
+  // Sizes are given landscape-first, the way camera sensors describe them; the iPhone turns the
+  // picture upright itself. "Wider view" asks for the sensor's full 4:3 shape so nothing is cropped off.
   const long = S.q === '1080' ? 1920 : 1280, short = S.q === '1080' ? 1080 : 720;
+  const video = { facingMode: S.facing, frameRate: { ideal: 30 }, width: { ideal: long } };
+  video.height = { ideal: S.wide ? Math.round(long * 3 / 4) : short };
   try {
-    stream = await getCam(long, short);
+    stream = await navigator.mediaDevices.getUserMedia({ video, audio: { echoCancellation: true, noiseSuppression: true } });
     await showCam();
-    // If the phone is upright but the picture came back sideways, ask again the other way round.
-    const v = $('cam');
-    if (portraitScreen() && v.videoWidth > v.videoHeight) { stopCam(); stream = await getCam(short, long); await showCam(); }
+    await zoomOut();
     $('cam').classList.add('live'); $('noCam').classList.add('hidden');
     $('cam').classList.toggle('mirror', S.facing === 'user');
   } catch (e) {
     $('noCam').textContent = 'Camera is off. Allow camera and microphone for this app in Settings, then reopen it.';
     console.error(e);
   }
+  camInfo();
+}
+// Some iPhone front cameras start cropped in; go to the widest zoom the camera allows and offer a slider.
+async function zoomOut(){
+  const t = stream?.getVideoTracks()[0], z = t?.getCapabilities?.().zoom;
+  $('zoomRow').classList.toggle('hidden', !z);
+  if (!z) return;
+  const sl = $('sZoom'); sl.min = z.min; sl.max = Math.min(z.max, z.min * 5); sl.step = 0.05;
+  const want = Math.min(Math.max(S.zoom ?? z.min, z.min), +sl.max); sl.value = want;
+  try { await t.applyConstraints({ advanced: [{ zoom: want }] }); } catch {}
+  applyS();
+}
+$('sZoom').oninput = async e => {
+  S.zoom = +e.target.value; saveS(); applyS();
+  try { await stream?.getVideoTracks()[0].applyConstraints({ advanced: [{ zoom: S.zoom }] }); } catch {}
+  camInfo();
+};
+function camInfo(){
+  const v = $('cam'), t = stream?.getVideoTracks()[0], st = t?.getSettings?.() || {};
+  $('camInfo').textContent = t ? `${v.videoWidth}×${v.videoHeight}` + (st.zoom ? ` · zoom ${(+st.zoom).toFixed(2)}` : '') : 'off';
 }
 function showCam(){
   const v = $('cam'); v.srcObject = stream;
