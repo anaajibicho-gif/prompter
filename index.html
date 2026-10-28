@@ -83,9 +83,10 @@ svg{display:block}
 
 /* ---------- recorder ---------- */
 #rec{position:fixed;inset:0;background:#000;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
-#cam{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0;transition:opacity .5s}
+#cam{position:absolute;left:0;top:50%;width:100%;height:calc(100vw * var(--frame,1.7778));max-height:100%;
+  transform:translateY(-50%);object-fit:cover;opacity:0;transition:opacity .5s}
 #cam.live{opacity:1}
-#cam.mirror{transform:scaleX(-1)}
+#cam.mirror{transform:translateY(-50%) scaleX(-1)}
 .no-cam{position:absolute;inset:0;display:grid;place-items:center;color:var(--text-3);font-size:15px;padding:0 40px;text-align:center}
 .top{position:absolute;z-index:4;left:0;right:0;top:calc(var(--safe-t) + 6px);height:44px;padding:0 12px;
   display:flex;align-items:center;justify-content:space-between}
@@ -97,7 +98,6 @@ svg{display:block}
 
 #prompt{position:absolute;left:0;right:0;top:calc(var(--safe-t) + 56px);height:var(--ph,40%);overflow:hidden;
   background:linear-gradient(rgba(0,0,0,calc(var(--dim,.55) + .15)),rgba(0,0,0,var(--dim,.55)) 70%,rgba(0,0,0,0));
-  backdrop-filter:blur(var(--blur,14px));-webkit-backdrop-filter:blur(var(--blur,14px));
   -webkit-mask-image:linear-gradient(transparent 0,#000 14%,#000 78%,transparent 100%);
           mask-image:linear-gradient(transparent 0,#000 14%,#000 78%,transparent 100%)}
 #ptext{padding:0 26px 90vh;padding-top:calc(var(--ph-px,300px) * .3);font:600 var(--fs,34px)/1.32 -apple-system,"SF Pro Display",system-ui,sans-serif;
@@ -272,7 +272,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;heigh
         <input type="checkbox" class="switch" id="sAuto"></label>
       <label class="set"><span class="lbl">3-second countdown</span><input type="checkbox" class="switch" id="sCount"></label>
       <label class="set"><span class="lbl">Mirror text<small>For a teleprompter glass rig</small></span><input type="checkbox" class="switch" id="sFlip"></label>
-      <label class="set"><span class="lbl">Wider view<small>Uses the camera's full picture. Video comes out a little less tall (3:4).</small></span>
+      <label class="set"><span class="lbl">Wider view<small>Keeps the camera's whole picture. Video comes out 3:4 instead of full-screen 9:16.</small></span>
         <input type="checkbox" class="switch" id="sWide"></label>
       <div class="set"><span class="lbl">Video quality</span>
         <div class="seg" id="sQ"><button data-v="720">720p</button><button data-v="1080">1080p</button></div></div>
@@ -372,6 +372,7 @@ const S = Object.assign({ fs: 34, ph: 40, dim: 45, count: true, auto: true, flip
 const saveS = () => store.set('settings', S);
 function applyS(){
   const r = $('rec').style;
+  r.setProperty('--frame', S.wide ? 4 / 3 : 16 / 9);
   r.setProperty('--fs', S.fs + 'px'); r.setProperty('--ph', S.ph + '%');
   r.setProperty('--dim', S.dim / 100); r.setProperty('--blur', Math.round(S.dim / 4) + 'px');
   r.setProperty('--ph-px', (innerHeight * S.ph / 100) + 'px');
@@ -396,11 +397,8 @@ $('sheetDone').onclick = $('scrim').onclick = () => setSheet(false);
 let stream = null;
 async function startCam(){
   stopCam();
-  // Sizes are given landscape-first, the way camera sensors describe them; the iPhone turns the
-  // picture upright itself. "Wider view" asks for the sensor's full 4:3 shape so nothing is cropped off.
-  const long = S.q === '1080' ? 1920 : 1280, short = S.q === '1080' ? 1080 : 720;
-  const video = { facingMode: S.facing, frameRate: { ideal: 30 }, width: { ideal: long } };
-  video.height = { ideal: S.wide ? Math.round(long * 3 / 4) : short };
+  // Always ask for the sensor's full 4:3 picture; asking for 16:9 makes iPhone pick a cropped-in mode.
+  const video = { facingMode: S.facing, frameRate: { ideal: 30 }, width: { ideal: 1920 }, height: { ideal: 1440 } };
   try {
     stream = await navigator.mediaDevices.getUserMedia({ video, audio: { echoCancellation: true, noiseSuppression: true } });
     await showCam();
@@ -477,7 +475,7 @@ function follow(){
   const target = Math.min(maxY(), w.offsetTop - guideY());
   if (target > goal) { goal = target; glide(); }
 }
-function resetPos(){ cancelAnimationFrame(glideH); y = goal = 0; pos = 0; heardN = 0; setY(); }
+function resetPos(){ cancelAnimationFrame(glideH); y = goal = 0; pos = 0; setY(); }
 function reanchor(){ requestAnimationFrame(() => { goal = y = 0; follow(); y = goal; setY(); }); }
 $('restartBtn').onclick = resetPos;
 
@@ -493,7 +491,7 @@ window.addEventListener('pointerup', () => { if (dragY == null) return; dragY = 
 
 /* ---------------- Voice follow ---------------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, listening = false, heardN = 0;
+let rec = null, listening = false;
 
 function setListen(on){
   if (on && !SR) { toast('This browser can’t listen. Open the app from Safari, or drag the text to scroll.', 5000); on = false; }
@@ -508,11 +506,10 @@ $('micBtn').onclick = () => setListen(!listening);
 function startVoice(){
   if (rec) return;
   rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = navigator.language || 'en-US';
-  rec.onstart = () => { heardN = 0; };  // each listening session starts its transcript from scratch
   rec.onresult = e => {
-    let txt = '';
-    for (let i = 0; i < e.results.length; i++) txt += ' ' + e.results[i][0].transcript;
-    onHeard(txt);
+    // only the newest bits — iPhone often repeats earlier phrases in its results
+    const r = e.results, n = r.length;
+    onHeard((n > 1 ? r[n - 2][0].transcript + ' ' : '') + r[n - 1][0].transcript);
   };
   rec.onend = () => { if (listening) try { rec.start(); } catch { rec = null; startVoice(); } }; // Safari stops every so often
   rec.onerror = ev => {
@@ -525,28 +522,22 @@ function startVoice(){
 }
 function stopVoice(){ if (rec) { rec.onend = null; try { rec.stop(); } catch {} } rec = null; }
 
-// Every new word you say moves the script forward one word. When the last three words you said
-// clearly match a spot nearby in the script, snap the count to that spot so it can't drift.
+// Find where the last few words you said appear in the script just ahead of where you are, and
+// move there. Only exact runs of words count, so mishearings and ad-libs just make it wait.
 function onHeard(txt){
-  const heard = txt.split(/\s+/).map(norm).filter(Boolean);
-  const n = heard.length;
-  const fresh = n - heardN;
-  if (fresh > 0) pos += Math.min(fresh, 6);
-  heardN = Math.max(heardN, n);
-  if (n >= 3) {
-    const [a, b, c] = heard.slice(-3);
-    if (Math.max(a.length, b.length, c.length) >= 4) {
-      let best = -1;
-      const lo = Math.max(2, Math.floor(pos) - 12), hi = Math.min(words.length - 1, Math.floor(pos) + 12);
-      for (let j = lo; j <= hi; j++) {
-        if (words[j].dataset.n === c && words[j-1].dataset.n === b && words[j-2].dataset.n === a &&
-            (best < 0 || Math.abs(j + 1 - pos) < Math.abs(best + 1 - pos))) best = j;
-      }
-      if (best >= 0) pos = best + 1;
-    }
+  const heard = txt.split(/\s+/).map(norm).filter(Boolean).slice(-4);
+  if (!heard.length || !words.length) return;
+  const at = Math.floor(pos);
+  let best = -1, bestScore = 0;
+  for (let j = Math.max(0, at - 3); j <= Math.min(words.length - 1, at + 25); j++) {
+    let k = 0;
+    while (k < heard.length && j - k >= 0 && words[j - k].dataset.n === heard[heard.length - 1 - k]) k++;
+    if (!k) continue;
+    const ahead = j - at, w = heard[heard.length - 1];
+    const ok = k >= 3 || (k === 2 && ahead <= 10 && w.length + heard[heard.length - 2].length >= 6) || (ahead <= 3 && w.length >= 5);
+    if (ok && (k > bestScore || (k === bestScore && Math.abs(ahead) < Math.abs(best - at)))) { best = j; bestScore = k; }
   }
-  pos = Math.min(pos, words.length);
-  follow();
+  if (best + 1 > pos) { pos = best + 1; follow(); }
 }
 window.__heard = onHeard; // handy for testing in a desktop browser
 
@@ -562,25 +553,53 @@ async function countdown(){
   for (let n = 3; n > 0; n--) { c.innerHTML = `<span>${n}</span>`; await new Promise(r => setTimeout(r, 800)); }
   c.classList.add('hidden');
 }
+// The phone hands us the camera picture in whatever shape it likes; we copy every frame into a
+// canvas that is always vertical (9:16, or 3:4 with Wider view), cropped from the center, and record
+// the canvas. That way the saved video is upright and framed exactly like the preview.
+const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d');
+let drawing = false;
+function frameSize(){
+  const w = S.q === '1080' ? 1080 : 720;
+  return [w, Math.round(w * (S.wide ? 4 / 3 : 16 / 9))];
+}
+function drawLoop(){
+  if (!drawing) return;
+  const v = $('cam'), vw = v.videoWidth, vh = v.videoHeight, W = canvas.width, H = canvas.height;
+  if (vw && vh) {
+    const a = W / H; let sw = vw, sh = vh;
+    if (vw / vh > a) sw = vh * a; else sh = vw / a;
+    ctx.drawImage(v, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, W, H);
+  }
+  v.requestVideoFrameCallback ? v.requestVideoFrameCallback(drawLoop) : requestAnimationFrame(drawLoop);
+}
+function recordStream(){
+  [canvas.width, canvas.height] = frameSize();
+  drawing = true; drawLoop();
+  const out = canvas.captureStream(30);
+  stream.getAudioTracks().forEach(t => out.addTrack(t));
+  return out;
+}
 async function startRec(){
   if (!stream) return toast('The camera isn’t on yet');
-  if (!window.MediaRecorder) return toast('This browser can’t record video');
+  if (!window.MediaRecorder || !canvas.captureStream) return toast('This browser can’t record video');
   // start listening inside the tap itself — Safari only allows the mic to start from a user gesture
   if (S.auto && !listening) setListen(true);
   $('recBtn').disabled = true;
   await countdown();
   lastMime = pickMime(); chunks = [];
-  recorder = new MediaRecorder(stream, lastMime ? { mimeType: lastMime, videoBitsPerSecond: S.q === '1080' ? 8e6 : 5e6 } : undefined);
+  recorder = new MediaRecorder(recordStream(), lastMime ? { mimeType: lastMime, videoBitsPerSecond: S.q === '1080' ? 8e6 : 5e6 } : undefined);
   recorder.ondataavailable = e => e.data && e.data.size && chunks.push(e.data);
   recorder.onstop = showReview;
   recorder.start(1000);
+  const mic = stream.getAudioTracks()[0];
+  if (mic) mic.onmute = () => { if (recording) toast('iPhone paused the microphone. If your take has no sound, turn off “Start listening when I hit record”.', 6000); };
   recording = true; $('recBtn').classList.add('on'); $('recBtn').disabled = false;
   $('recBtn').setAttribute('aria-label', 'Stop recording'); $('flipCamBtn').disabled = true;
   startT = Date.now(); $('timer').classList.remove('hidden'); updTimer(); timerH = setInterval(updTimer, 500);
 }
 function stopRec(){
   if (!recorder) return;
-  recording = false; recorder.stop(); setListen(false);
+  recording = false; recorder.stop(); drawing = false; setListen(false);
   $('recBtn').classList.remove('on'); $('recBtn').setAttribute('aria-label', 'Start recording'); $('flipCamBtn').disabled = false;
   clearInterval(timerH); $('timer').classList.add('hidden');
 }
