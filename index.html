@@ -83,7 +83,7 @@ svg{display:block}
 
 /* ---------- recorder ---------- */
 #rec{position:fixed;inset:0;background:#000;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
-#cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .5s}
+#cam{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0;transition:opacity .5s}
 #cam.live{opacity:1}
 #cam.mirror{transform:scaleX(-1)}
 .no-cam{position:absolute;inset:0;display:grid;place-items:center;color:var(--text-3);font-size:15px;padding:0 40px;text-align:center}
@@ -104,9 +104,6 @@ svg{display:block}
   letter-spacing:-.01em;transform:translateY(var(--y,0));will-change:transform;white-space:pre-wrap;overflow-wrap:break-word;
   text-shadow:0 1px 12px rgba(0,0,0,.35)}
 #prompt.flip #ptext{transform:translateY(var(--y,0)) scaleX(-1)}
-#ptext .w{transition:color .35s var(--ease)}
-#ptext .w.read{color:rgba(245,245,247,.32)}
-#ptext .w.now{color:var(--amber)}
 #guide{position:absolute;left:8px;top:30%;width:4px;height:calc(var(--fs,34px) * 1.1);transform:translateY(-15%);border-radius:2px;
   background:rgba(255,255,255,.25);transition:background .3s}
 #rec.listening #guide{background:var(--amber);box-shadow:0 0 0 0 rgba(255,181,71,.6);animation:breathe 1.6s var(--ease) infinite}
@@ -389,35 +386,48 @@ $('sheetDone').onclick = $('scrim').onclick = () => setSheet(false);
 
 /* ---------------- Camera ---------------- */
 let stream = null;
+const portraitScreen = () => innerHeight >= innerWidth;
+async function getCam(w, h){
+  return navigator.mediaDevices.getUserMedia({
+    video: { facingMode: S.facing, width: { ideal: w }, height: { ideal: h }, frameRate: { ideal: 30 } },
+    audio: { echoCancellation: true, noiseSuppression: true }
+  });
+}
 async function startCam(){
   stopCam();
-  const h = +S.q, w = Math.round(h * 16 / 9);
+  // Ask in landscape terms (how camera sensors are described); iPhone rotates it to match the phone.
+  const long = S.q === '1080' ? 1920 : 1280, short = S.q === '1080' ? 1080 : 720;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: S.facing, width: { ideal: h }, height: { ideal: w } }, // portrait
-      audio: { echoCancellation: true, noiseSuppression: true }
-    });
-    $('cam').srcObject = stream; $('cam').classList.add('live'); $('noCam').classList.add('hidden');
+    stream = await getCam(long, short);
+    await showCam();
+    // If the phone is upright but the picture came back sideways, ask again the other way round.
+    const v = $('cam');
+    if (portraitScreen() && v.videoWidth > v.videoHeight) { stopCam(); stream = await getCam(short, long); await showCam(); }
+    $('cam').classList.add('live'); $('noCam').classList.add('hidden');
     $('cam').classList.toggle('mirror', S.facing === 'user');
   } catch (e) {
     $('noCam').textContent = 'Camera is off. Allow camera and microphone for this app in Settings, then reopen it.';
     console.error(e);
   }
 }
-function stopCam(){ if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; $('cam').classList.remove('live'); }
+function showCam(){
+  const v = $('cam'); v.srcObject = stream;
+  return new Promise(r => { if (v.videoWidth) return r(); v.onloadedmetadata = () => r(); setTimeout(r, 1500); });
+}
+function stopCam(){ if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; $('cam').srcObject = null; $('cam').classList.remove('live'); }
 $('flipCamBtn').onclick = () => { if (recording) return; S.facing = S.facing === 'user' ? 'environment' : 'user'; saveS(); startCam(); };
 
-/* ---------------- Prompter (moves only with your voice) ---------------- */
+/* ---------------- Prompter: scrolls down as you speak ---------------- */
 const pt = $('ptext');
-let y = 0, words = [], wordIdx = -1;
+let y = 0, goal = 0, words = [], pos = 0;   // pos = index of the next word you'll say
 
 function buildText(text){
   pt.innerHTML = ''; words = [];
-  // Wrap each word in a span (keeps original spacing/newlines) so we can track and highlight it
+  // Wrap each word in a span so we know where each one sits on screen
   text.trim().split(/(\s+)/).forEach(tok => {
     if (!tok) return;
     if (/^\s+$/.test(tok)) { pt.append(tok); return; }
-    const s = document.createElement('span'); s.className = 'w'; s.textContent = tok;
+    const s = document.createElement('span'); s.textContent = tok;
     s.dataset.n = norm(tok); words.push(s); pt.append(s);
   });
   resetPos();
@@ -426,32 +436,42 @@ const NUM = ['zero','one','two','three','four','five','six','seven','eight','nin
   'thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty'];
 const norm = s => { s = s.toLowerCase().replace(/[’]/g, "'").replace(/[^\p{L}\p{N}']/gu, '');
   return /^\d+$/.test(s) && +s <= 20 ? NUM[+s] : s; };
-const same = (a, b) => a === b || (a.length >= 5 && b.length >= 5 && a.slice(0, 4) === b.slice(0, 4));
 const guideY = () => $('prompt').clientHeight * 0.3;
 const maxY = () => Math.max(0, pt.scrollHeight - $('prompt').clientHeight * 0.7);
 function setY(){ y = Math.min(Math.max(0, y), maxY()); pt.style.setProperty('--y', -y + 'px'); }
-const wordTop = w => w.offsetTop; // position inside the prompter, before scrolling
 
-function paint(){ words.forEach((w, k) => w.className = k <= wordIdx ? 'w read' : k === wordIdx + 1 ? 'w now' : 'w'); }
-function resetPos(){ cancelAnimationFrame(animH); y = 0; wordIdx = -1; paint(); setY(); }
-function reanchor(){ requestAnimationFrame(() => { if (wordIdx >= 0) { y = wordTop(words[wordIdx]) - guideY(); setY(); } }); }
+// Glide toward the goal; the goal only ever moves down, so the text never jumps back up on its own.
+let glideH = 0;
+function glide(){
+  cancelAnimationFrame(glideH);
+  const step = () => { const d = goal - y;
+    if (Math.abs(d) < 0.5) { y = goal; setY(); return; }
+    y += d * 0.07; setY(); glideH = requestAnimationFrame(step); };
+  step();
+}
+function follow(){
+  const w = words[Math.min(words.length - 1, Math.max(0, Math.round(pos)))];
+  if (!w) return;
+  const target = Math.min(maxY(), w.offsetTop - guideY());
+  if (target > goal) { goal = target; glide(); }
+}
+function resetPos(){ cancelAnimationFrame(glideH); y = goal = 0; pos = 0; heardN = 0; setY(); }
+function reanchor(){ requestAnimationFrame(() => { goal = y = 0; follow(); y = goal; setY(); }); }
 $('restartBtn').onclick = resetPos;
 
-// drag to jump around; listening picks up from wherever the guide line lands
+// drag to jump around; listening carries on from the word at the guide line
 let dragY = null;
-$('prompt').addEventListener('pointerdown', e => { dragY = e.clientY; cancelAnimationFrame(animH); });
+$('prompt').addEventListener('pointerdown', e => { dragY = e.clientY; cancelAnimationFrame(glideH); });
 window.addEventListener('pointermove', e => { if (dragY == null) return;
   y -= e.clientY - dragY; dragY = e.clientY; setY(); });
-window.addEventListener('pointerup', () => { if (dragY != null) syncWordToY(); dragY = null; });
-function syncWordToY(){
-  const line = y + guideY();
-  const i = words.findIndex(w => wordTop(w) + w.offsetHeight > line);
-  wordIdx = (i < 0 ? words.length : i) - 1; paint();
-}
+window.addEventListener('pointerup', () => { if (dragY == null) return; dragY = null;
+  goal = y; const line = y + guideY();
+  const i = words.findIndex(w => w.offsetTop + w.offsetHeight > line);
+  pos = i < 0 ? words.length : i; });
 
 /* ---------------- Voice follow ---------------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, listening = false;
+let rec = null, listening = false, heardN = 0;
 
 function setListen(on){
   if (on && !SR) { toast('This browser can’t listen. Open the app from Safari, or drag the text to scroll.', 5000); on = false; }
@@ -466,6 +486,7 @@ $('micBtn').onclick = () => setListen(!listening);
 function startVoice(){
   if (rec) return;
   rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = navigator.language || 'en-US';
+  rec.onstart = () => { heardN = 0; };  // each listening session starts its transcript from scratch
   rec.onresult = e => {
     let txt = '';
     for (let i = 0; i < e.results.length; i++) txt += ' ' + e.results[i][0].transcript;
@@ -482,37 +503,28 @@ function startVoice(){
 }
 function stopVoice(){ if (rec) { rec.onend = null; try { rec.stop(); } catch {} } rec = null; }
 
-// Match the last few words heard against the script just ahead of where you are.
+// Every new word you say moves the script forward one word. When the last three words you said
+// clearly match a spot nearby in the script, snap the count to that spot so it can't drift.
 function onHeard(txt){
-  const heard = txt.split(/\s+/).map(norm).filter(Boolean).slice(-5);
-  if (!heard.length || !words.length) return;
-  const lastW = heard[heard.length - 1];
-  let best = -1, bestScore = 0;
-  const lo = Math.max(0, wordIdx - 2), hi = Math.min(words.length - 1, wordIdx + 30);
-  for (let j = lo; j <= hi; j++) {
-    if (!same(words[j].dataset.n, lastW)) continue;
-    let s = 1;
-    for (let k = 1; k < heard.length && j - k >= 0; k++) {
-      if (same(words[j - k].dataset.n, heard[heard.length - 1 - k])) s++; else break;
+  const heard = txt.split(/\s+/).map(norm).filter(Boolean);
+  const n = heard.length;
+  const fresh = n - heardN;
+  if (fresh > 0) pos += Math.min(fresh, 6);
+  heardN = Math.max(heardN, n);
+  if (n >= 3) {
+    const [a, b, c] = heard.slice(-3);
+    if (Math.max(a.length, b.length, c.length) >= 4) {
+      let best = -1;
+      const lo = Math.max(2, Math.floor(pos) - 12), hi = Math.min(words.length - 1, Math.floor(pos) + 12);
+      for (let j = lo; j <= hi; j++) {
+        if (words[j].dataset.n === c && words[j-1].dataset.n === b && words[j-2].dataset.n === a &&
+            (best < 0 || Math.abs(j + 1 - pos) < Math.abs(best + 1 - pos))) best = j;
+      }
+      if (best >= 0) pos = best + 1;
     }
-    const near = Math.abs(j - wordIdx - 1) < Math.abs(best - wordIdx - 1);
-    if (s > bestScore || (s === bestScore && near)) { best = j; bestScore = s; }
   }
-  if (best <= wordIdx) return;
-  const ahead = best - wordIdx;
-  // a single matching word only counts if it's right where we expect; a run of 2+ can jump further
-  if (bestScore >= 2 || (ahead <= 4 && lastW.length >= 3)) moveTo(best);
-}
-function moveTo(i){
-  wordIdx = i; paint();
-  animateY(wordTop(words[i]) - guideY());
-}
-let animH = 0;
-function animateY(target){
-  cancelAnimationFrame(animH);
-  const step = () => { const d = target - y; if (Math.abs(d) < 0.5) { y = target; setY(); return; }
-    y += d * 0.12; setY(); animH = requestAnimationFrame(step); };
-  step();
+  pos = Math.min(pos, words.length);
+  follow();
 }
 window.__heard = onHeard; // handy for testing in a desktop browser
 
