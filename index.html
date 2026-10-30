@@ -94,6 +94,9 @@ svg{display:block}
 #timer{position:absolute;left:50%;transform:translateX(-50%);height:30px;padding:0 12px;border-radius:15px;
   display:flex;align-items:center;gap:7px;font-weight:600;font-size:15px;font-variant-numeric:tabular-nums}
 #timer .rec-dot{animation:blink 1.2s steps(2,start) infinite}
+#timer.paused .rec-dot{display:none}
+#timer .shots{color:var(--text-2);font-weight:500}
+#doneBtn{height:44px}
 @keyframes blink{to{visibility:hidden}}
 
 #prompt{position:absolute;left:0;right:0;top:calc(var(--safe-t) + 56px);height:var(--ph,40%);overflow:hidden;
@@ -120,7 +123,10 @@ svg{display:block}
 .icon-btn.glass{width:44px;height:44px}
 #recBtn{width:78px;height:78px;border-radius:50%;display:grid;place-items:center;box-shadow:inset 0 0 0 4px #fff}
 #recBtn i{width:62px;height:62px;border-radius:31px;background:var(--red);transition:all .3s var(--ease)}
-#recBtn.on i{width:30px;height:30px;border-radius:8px}
+#recBtn .pz{display:none;color:#fff}
+#recBtn.live{box-shadow:inset 0 0 0 4px var(--red)}
+#recBtn.live i{display:none}
+#recBtn.live .pz{display:block}
 #recBtn:active i{transform:scale(.92)}
 #recBtn:disabled{opacity:.6}
 
@@ -228,7 +234,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;heigh
     <button class="icon-btn glass" id="closeBtn" aria-label="Close">
       <svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 3l10 10M13 3 3 13" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
     </button>
-    <div id="timer" class="glass hidden"><span class="rec-dot"></span><span id="timerT">0:00</span></div>
+    <div id="timer" class="glass hidden"><span class="rec-dot"></span><span id="timerT">0:00</span><span class="shots" id="shotsT"></span></div>
     <div class="r">
       <button class="icon-btn glass" id="setBtn" aria-label="Display settings">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"/><circle cx="13" cy="6" r="2"/><circle cx="7" cy="14" r="2"/></svg>
@@ -242,11 +248,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;heigh
     <div class="l">
       <button id="micBtn" class="glass"></button>
     </div>
-    <button id="recBtn" aria-label="Start recording"><i></i></button>
+    <button id="recBtn" aria-label="Start recording"><i></i><svg class="pz" width="26" height="26" viewBox="0 0 26 26"><rect x="6" y="4" width="5" height="18" rx="1.5" fill="currentColor"/><rect x="15" y="4" width="5" height="18" rx="1.5" fill="currentColor"/></svg></button>
     <div class="r">
       <button class="icon-btn glass" id="restartBtn" aria-label="Back to the top">
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9a5.5 5.5 0 1 0 1.6-3.9M3.5 2.5v3h3"/></svg>
       </button>
+      <button class="pill solid hidden" id="doneBtn">Done</button>
       <button class="icon-btn glass" id="flipCamBtn" aria-label="Switch camera">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5h3l1.5-2h6l1.5 2h3v9h-15z"/><path d="M7.6 11.2a2.6 2.6 0 0 1 4.6-1.4M12.4 12.8a2.6 2.6 0 0 1-4.6 1.4"/><path d="M12.4 8.6v1.4H11M7.6 15.4V14H9"/></svg>
       </button>
@@ -579,6 +586,9 @@ function recordStream(){
   stream.getAudioTracks().forEach(t => out.addTrack(t));
   return out;
 }
+// A take can have several shots: tap the center button to pause, move somewhere else, tap again to
+// keep going. The recorder just pauses in between, so Done gives one continuous video.
+let paused = false, shots = 0, elapsed = 0, segStart = 0;
 async function startRec(){
   if (!stream) return toast('The camera isn’t on yet');
   if (!window.MediaRecorder || !canvas.captureStream) return toast('This browser can’t record video');
@@ -592,27 +602,55 @@ async function startRec(){
   recorder.onstop = showReview;
   recorder.start(1000);
   const mic = stream.getAudioTracks()[0];
-  if (mic) mic.onmute = () => { if (recording) toast('iPhone paused the microphone. If your take has no sound, turn off “Start listening when I hit record”.', 6000); };
-  recording = true; $('recBtn').classList.add('on'); $('recBtn').disabled = false;
-  $('recBtn').setAttribute('aria-label', 'Stop recording'); $('flipCamBtn').disabled = true;
-  startT = Date.now(); $('timer').classList.remove('hidden'); updTimer(); timerH = setInterval(updTimer, 500);
+  if (mic) mic.onmute = () => { if (recording && !paused) toast('iPhone paused the microphone. If your take has no sound, turn off “Start listening when I hit record”.', 6000); };
+  recording = true; paused = false; shots = 1; elapsed = 0; segStart = Date.now();
+  $('recBtn').disabled = false; timerH = setInterval(updTimer, 500); takeUI();
 }
-function stopRec(){
+function pauseRec(){
+  if (!recorder || paused) return;
+  if (!recorder.pause) return finishRec(); // very old browsers can't pause: just finish the take
+  recorder.pause(); paused = true; elapsed += Date.now() - segStart;
+  setListen(false); takeUI();
+}
+async function resumeRec(){
+  if (!recorder || !paused) return;
+  if (S.auto && !listening) setListen(true);
+  $('recBtn').disabled = true;
+  await countdown();
+  recorder.resume(); paused = false; shots++; segStart = Date.now();
+  $('recBtn').disabled = false; takeUI();
+}
+function finishRec(){
   if (!recorder) return;
-  recording = false; recorder.stop(); drawing = false; setListen(false);
-  $('recBtn').classList.remove('on'); $('recBtn').setAttribute('aria-label', 'Start recording'); $('flipCamBtn').disabled = false;
-  clearInterval(timerH); $('timer').classList.add('hidden');
+  if (!paused) elapsed += Date.now() - segStart;
+  recording = paused = false; recorder.stop(); drawing = false; setListen(false);
+  clearInterval(timerH); takeUI();
 }
-function updTimer(){ const s = Math.floor((Date.now() - startT) / 1000);
-  $('timerT').textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
-$('recBtn').onclick = () => recording ? stopRec() : startRec();
+function takeUI(){
+  const live = recording && !paused, rb = $('recBtn');
+  rb.classList.toggle('live', live);
+  rb.setAttribute('aria-label', live ? 'Pause' : recording ? 'Record next shot' : 'Start recording');
+  $('doneBtn').classList.toggle('hidden', !recording);
+  $('restartBtn').classList.toggle('hidden', recording);
+  $('flipCamBtn').classList.toggle('hidden', recording);
+  $('timer').classList.toggle('hidden', !recording);
+  $('timer').classList.toggle('paused', paused);
+  updTimer();
+}
+const fmt = ms => { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+function updTimer(){
+  $('timerT').textContent = (paused ? 'Paused · ' : '') + fmt(elapsed + (recording && !paused ? Date.now() - segStart : 0));
+  $('shotsT').textContent = shots > 1 || paused ? `· shot ${paused ? shots + 1 : shots}` : '';
+}
+$('recBtn').onclick = () => !recording ? startRec() : paused ? resumeRec() : pauseRec();
+$('doneBtn').onclick = finishRec;
 
 function showReview(){
   const type = (lastMime || chunks[0]?.type || 'video/mp4').split(';')[0];
   lastBlob = new Blob(chunks, { type });
   const v = $('playback'); if (v.src) URL.revokeObjectURL(v.src);
   v.src = URL.createObjectURL(lastBlob);
-  $('reviewHead').textContent = $('timerT').textContent + ' take';
+  $('reviewHead').textContent = fmt(elapsed) + (shots > 1 ? ` · ${shots} shots` : '');
   $('review').classList.remove('hidden');
 }
 $('discardBtn').onclick = () => { $('review').classList.add('hidden'); $('playback').pause(); resetPos(); };
@@ -640,7 +678,7 @@ async function openRecorder(){
 }
 $('closeBtn').onclick = () => {
   if (recording && !confirm('Stop recording and throw this take away?')) return;
-  if (recording) { recorder.onstop = null; stopRec(); }
+  if (recording) { recorder.onstop = null; finishRec(); }
   setListen(false); stopCam(); setSheet(false); wake?.release?.(); wake = null;
   $('rec').classList.add('hidden'); $('home').classList.remove('hidden'); show('libView'); renderList();
 };
