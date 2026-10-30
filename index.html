@@ -83,10 +83,20 @@ svg{display:block}
 
 /* ---------- recorder ---------- */
 #rec{position:fixed;inset:0;background:#000;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
-#cam{position:absolute;left:0;top:50%;width:100%;height:calc(100vw * var(--frame,1.7778));max-height:100%;
-  transform:translateY(-50%);object-fit:cover;opacity:0;transition:opacity .5s}
+/* the preview is exactly the recorded frame (--frame = height / width), as big as the screen allows */
+#cam{position:absolute;left:50%;top:50%;width:min(100vw, calc(100dvh / var(--frame,1.7778)));aspect-ratio:1 / var(--frame,1.7778);height:auto;
+  transform:translate(-50%,-50%);object-fit:cover;opacity:0;transition:opacity .5s}
 #cam.live{opacity:1}
-#cam.mirror{transform:translateY(-50%) scaleX(-1)}
+#cam.mirror{transform:translate(-50%,-50%) scaleX(-1)}
+#turnHint{position:absolute;z-index:3;left:50%;bottom:calc(var(--safe-b) + 128px);transform:translateX(-50%);
+  display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:16px;font-size:15px;font-weight:600;white-space:nowrap}
+@media (orientation:landscape){
+  #prompt{height:max(var(--ph,40%),52%);top:calc(var(--safe-t) + 54px)}
+  #ptext{padding-left:max(26px,calc(env(safe-area-inset-left) + 12px));padding-right:max(26px,calc(env(safe-area-inset-right) + 12px))}
+  .top{padding:0 max(12px,env(safe-area-inset-left)) 0 max(12px,env(safe-area-inset-right))}
+  .bottom{padding:12px max(16px,env(safe-area-inset-right)) calc(var(--safe-b) + 10px) max(16px,env(safe-area-inset-left))}
+  #recBtn{width:68px;height:68px}#recBtn i{width:54px;height:54px}
+}
 .no-cam{position:absolute;inset:0;display:grid;place-items:center;color:var(--text-3);font-size:15px;padding:0 40px;text-align:center}
 .top{position:absolute;z-index:4;left:0;right:0;top:calc(var(--safe-t) + 6px);height:44px;padding:0 12px;
   display:flex;align-items:center;justify-content:space-between}
@@ -227,7 +237,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;heigh
 <!-- ============ RECORDER ============ -->
 <section id="rec" class="hidden">
   <div class="no-cam" id="noCam">Waiting for camera…</div>
-  <video id="cam" playsinline autoplay muted class="mirror"></video>
+  <video id="cam" playsinline autoplay muted></video>
   <div id="prompt"><div id="ptext"></div><div id="guide"></div></div>
 
   <div class="top">
@@ -242,6 +252,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;heigh
     </div>
   </div>
 
+  <div id="turnHint" class="glass hidden">
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="16" height="9" rx="2"/><path d="M7 3.5a7 7 0 0 1 9 1.5M16 2.5v2.5h-2.5"/></svg>
+    Turn your phone sideways</div>
   <div id="count" class="hidden"></div>
 
   <div class="bottom">
@@ -279,7 +292,11 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;heigh
         <input type="checkbox" class="switch" id="sAuto"></label>
       <label class="set"><span class="lbl">3-second countdown</span><input type="checkbox" class="switch" id="sCount"></label>
       <label class="set"><span class="lbl">Mirror text<small>For a teleprompter glass rig</small></span><input type="checkbox" class="switch" id="sFlip"></label>
-      <label class="set"><span class="lbl">Wider view<small>Keeps the camera's whole picture. Video comes out 3:4 instead of full-screen 9:16.</small></span>
+      <label class="set"><span class="lbl">Mirror front camera<small>Flips the picture like a mirror, in the preview and the saved video.</small></span>
+        <input type="checkbox" class="switch" id="sMirror"></label>
+      <div class="set"><span class="lbl">Video shape</span>
+        <div class="seg" id="sShape"><button data-v="h">Horizontal</button><button data-v="v">Vertical</button></div></div>
+      <label class="set"><span class="lbl">Wider view<small>Keeps the camera's whole picture (4:3) instead of trimming it to 16:9.</small></span>
         <input type="checkbox" class="switch" id="sWide"></label>
       <div class="set"><span class="lbl">Video quality</span>
         <div class="seg" id="sQ"><button data-v="720">720p</button><button data-v="1080">1080p</button></div></div>
@@ -374,12 +391,14 @@ $('fileIn').onchange = async e => { const f = e.target.files[0]; if (!f) return;
 $('goBtn').onclick = () => { commitEditor(); if (!current.body.trim()) return toast('Add some words to your script first'); openRecorder(); };
 
 /* ---------------- Settings ---------------- */
-const S = Object.assign({ fs: 34, ph: 40, dim: 45, count: true, auto: true, flip: false, q: '720', wide: false, zoom: null, facing: 'user' },
+const S = Object.assign({ fs: 34, ph: 40, dim: 45, count: true, auto: true, flip: false, q: '720', shape: 'v', wide: false, mirror: false, zoom: null, facing: 'user' },
                         store.get('settings', {}));
 const saveS = () => store.set('settings', S);
 function applyS(){
   const r = $('rec').style;
-  r.setProperty('--frame', S.wide ? 4 / 3 : 16 / 9);
+  r.setProperty('--frame', frameRatio());
+  $('cam').classList.toggle('mirror', mirrored());
+  turnHint();
   r.setProperty('--fs', S.fs + 'px'); r.setProperty('--ph', S.ph + '%');
   r.setProperty('--dim', S.dim / 100); r.setProperty('--blur', Math.round(S.dim / 4) + 'px');
   r.setProperty('--ph-px', (innerHeight * S.ph / 100) + 'px');
@@ -388,13 +407,15 @@ function applyS(){
   [['sFs',22,64],['sPh',25,80],['sDim',0,90]].forEach(([id,lo,hi]) =>
     $(id).style.setProperty('--p', ((+$(id).value - lo) / (hi - lo) * 100) + '%'));
   [...$('sQ').children].forEach(b => b.classList.toggle('on', b.dataset.v === S.q));
+  [...$('sShape').children].forEach(b => b.classList.toggle('on', b.dataset.v === S.shape));
   const z = $('sZoom'); z.style.setProperty('--p', ((z.value - z.min) / ((z.max - z.min) || 1) * 100) + '%');
   $('oZoom').textContent = (+z.value).toFixed(1) + '×';
 }
 [['sFs','fs'],['sPh','ph'],['sDim','dim']].forEach(([id,k]) => { $(id).value = S[k];
   $(id).oninput = e => { S[k] = +e.target.value; applyS(); saveS(); if (k !== 'dim') reanchor(); }; });
-[['sCount','count'],['sAuto','auto'],['sFlip','flip'],['sWide','wide']].forEach(([id,k]) => { $(id).checked = S[k];
+[['sCount','count'],['sAuto','auto'],['sFlip','flip'],['sWide','wide'],['sMirror','mirror']].forEach(([id,k]) => { $(id).checked = S[k];
   $(id).onchange = e => { S[k] = e.target.checked; applyS(); saveS(); if (k === 'wide' && !recording) startCam(); }; });
+$('sShape').onclick = e => { const v = e.target.dataset?.v; if (!v || v === S.shape || recording) return; S.shape = v; saveS(); applyS(); reanchor(); };
 $('sQ').onclick = e => { const v = e.target.dataset?.v; if (!v || v === S.q) return; S.q = v; saveS(); applyS(); if (!recording) startCam(); };
 const setSheet = open => { $('sheet').classList.toggle('open', open); $('scrim').classList.toggle('open', open); };
 $('setBtn').onclick = () => { camInfo(); setSheet(true); };
@@ -411,7 +432,6 @@ async function startCam(){
     await showCam();
     await zoomOut();
     $('cam').classList.add('live'); $('noCam').classList.add('hidden');
-    $('cam').classList.toggle('mirror', S.facing === 'user');
   } catch (e) {
     $('noCam').textContent = 'Camera is off. Allow camera and microphone for this app in Settings, then reopen it.';
     console.error(e);
@@ -442,7 +462,7 @@ function showCam(){
   return new Promise(r => { if (v.videoWidth) return r(); v.onloadedmetadata = () => r(); setTimeout(r, 1500); });
 }
 function stopCam(){ if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; $('cam').srcObject = null; $('cam').classList.remove('live'); }
-$('flipCamBtn').onclick = () => { if (recording) return; S.facing = S.facing === 'user' ? 'environment' : 'user'; saveS(); startCam(); };
+$('flipCamBtn').onclick = () => { if (recording) return; S.facing = S.facing === 'user' ? 'environment' : 'user'; saveS(); applyS(); startCam(); };
 
 /* ---------------- Prompter: scrolls down as you speak ---------------- */
 const pt = $('ptext');
@@ -561,20 +581,27 @@ async function countdown(){
   c.classList.add('hidden');
 }
 // The phone hands us the camera picture in whatever shape it likes; we copy every frame into a
-// canvas that is always vertical (9:16, or 3:4 with Wider view), cropped from the center, and record
+// canvas of a fixed shape (vertical or horizontal, see frameRatio), cropped from the center, and record
 // the canvas. That way the saved video is upright and framed exactly like the preview.
 const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d');
 let drawing = false;
+// Off by default so the picture shows the way it was really shot; when on, preview and video both flip.
+const mirrored = () => S.mirror && S.facing === 'user';
+// height ÷ width of the saved video
+function frameRatio(){ return S.shape === 'h' ? (S.wide ? 3 / 4 : 9 / 16) : (S.wide ? 4 / 3 : 16 / 9); }
 function frameSize(){
-  const w = S.q === '1080' ? 1080 : 720;
-  return [w, Math.round(w * (S.wide ? 4 / 3 : 16 / 9))];
+  const short = S.q === '1080' ? 1080 : 720, r = frameRatio();
+  return r < 1 ? [Math.round(short / r), short] : [short, Math.round(short * r)];
 }
+// Horizontal video needs the phone held sideways; holding it upright would crop the picture way in.
+function turnHint(){ $('turnHint').classList.toggle('hidden', !(S.shape === 'h' && innerHeight > innerWidth && !recording)); }
 function drawLoop(){
   if (!drawing) return;
   const v = $('cam'), vw = v.videoWidth, vh = v.videoHeight, W = canvas.width, H = canvas.height;
   if (vw && vh) {
     const a = W / H; let sw = vw, sh = vh;
     if (vw / vh > a) sw = vh * a; else sh = vw / a;
+    ctx.setTransform(mirrored() ? -1 : 1, 0, 0, 1, mirrored() ? W : 0, 0);
     ctx.drawImage(v, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, W, H);
   }
   v.requestVideoFrameCallback ? v.requestVideoFrameCallback(drawLoop) : requestAnimationFrame(drawLoop);
@@ -635,6 +662,7 @@ function takeUI(){
   $('flipCamBtn').classList.toggle('hidden', recording);
   $('timer').classList.toggle('hidden', !recording);
   $('timer').classList.toggle('paused', paused);
+  turnHint();
   updTimer();
 }
 const fmt = ms => { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
@@ -683,6 +711,7 @@ $('closeBtn').onclick = () => {
   $('rec').classList.add('hidden'); $('home').classList.remove('hidden'); show('libView'); renderList();
 };
 addEventListener('resize', () => { if (!$('rec').classList.contains('hidden')) { applyS(); reanchor(); } });
+addEventListener('orientationchange', () => setTimeout(() => { if (!$('rec').classList.contains('hidden')) { applyS(); reanchor(); } }, 300));
 
 renderList();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
